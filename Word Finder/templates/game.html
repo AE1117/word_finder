@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WORD FINDER PINGUIN</title>
+    <!-- CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+    <div class="level-info">Level: <span id="level-num"></span></div>
+
+    <div class="current-word" id="preview-text"></div>
+
+    <div class="game-main">
+        <!-- Extra words list -->
+        <div id="extra-words-container">
+            <div class="extra-header">EXTRA</div>
+            <div id="extra-list">
+                <!-- Extra words list -->
+            </div>
+        </div>
+
+        <!-- Bulmaca Alanı -->
+        <div id="grid-scale-container">
+            <div id="grid-wrapper" class="crossword-grid">
+                <!-- Dynamic Grid  -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Letter -->
+    <div class="wheel-container" id="wheel-base">
+        <canvas id="connection-canvas"></canvas>
+        <div class="wheel-bg" id="wheel">
+            <!-- Dynamic Letters -->
+        </div>
+    </div>
+
+    <script>
+        let gameData = {{ data|tojson }};
+        let wordsStatus = {};
+        let foundExtraWords = new Set();
+        let selectedIndices = [];
+        let isDragging = false;
+
+        const gridWrapper = document.getElementById('grid-wrapper');
+        const wheel = document.getElementById('wheel');
+        const canvas = document.getElementById('connection-canvas');
+        const ctx = canvas.getContext('2d');
+        const preview = document.getElementById('preview-text');
+        const extraList = document.getElementById('extra-list');
+        const levelNumDisplay = document.getElementById('level-num');
+
+        function initGame() {
+            gridWrapper.innerHTML = '';
+            wheel.innerHTML = '';
+            extraList.innerHTML = '';
+            foundExtraWords.clear();
+            wordsStatus = {};
+            levelNumDisplay.innerText = gameData.level_number;
+
+            setupGrid();
+            setupWheel();
+        }
+
+        function setupGrid() {
+            if (!gameData.words || gameData.words.length === 0) return;
+
+            let maxX = 0, maxY = 0;
+            gameData.words.forEach(w => {
+                const endX = w.direction === 'h' ? w.x + w.word.length - 1 : w.x;
+                const endY = w.direction === 'v' ? w.y + w.word.length - 1 : w.y;
+                maxX = Math.max(maxX, endX); maxY = Math.max(maxY, endY);
+            });
+
+            const cols = maxX + 1;
+            const rows = maxY + 1;
+            gridWrapper.style.gridTemplateColumns = `repeat(${cols}, 52px)`;
+
+            const gridMap = {};
+            gameData.words.forEach(w => {
+                wordsStatus[w.word] = false;
+                for(let i=0; i<w.word.length; i++) {
+                    const cx = w.direction === 'h' ? w.x + i : w.x;
+                    const cy = w.direction === 'v' ? w.y + i : w.y;
+                    gridMap[`${cx}-${cy}`] = true;
+                }
+            });
+
+            for(let y=0; y<rows; y++) {
+                for(let x=0; x<cols; x++) {
+                    const div = document.createElement('div');
+                    const hasLetter = gridMap[`${x}-${y}`];
+                    div.className = hasLetter ? 'cell active' : 'cell opacity-0 pointer-events-none';
+                    div.id = `cell-${x}-${y}`;
+                    gridWrapper.appendChild(div);
+                }
+            }
+
+            // Auto Scaling
+            const scale = Math.min(
+                1.2,
+                (window.innerWidth * 0.8) / (cols * 60),
+                (window.innerHeight * 0.5) / (rows * 60)
+            );
+            gridWrapper.style.transform = `scale(${scale})`;
+        }
+
+        function setupWheel() {
+            gameData.letters.forEach((char, i) => {
+                const angle = (i / gameData.letters.length) * 2 * Math.PI - Math.PI/2;
+                const x = 120 + 90 * Math.cos(angle);
+                const y = 120 + 90 * Math.sin(angle);
+                const btn = document.createElement('div');
+                btn.className = 'wheel-letter';
+                btn.innerText = char;
+                btn.style.left = (x - 25) + 'px';
+                btn.style.top = (y - 25) + 'px';
+                btn.dataset.index = i;
+                wheel.appendChild(btn);
+            });
+            canvas.width = 240;
+            canvas.height = 240;
+        }
+
+        function getLetterUnderPoint(x, y) {
+            const wheelRect = wheel.getBoundingClientRect();
+            const lx = x - wheelRect.left;
+            const ly = y - wheelRect.top;
+            for (let btn of document.querySelectorAll('.wheel-letter')) {
+                const bx = parseFloat(btn.style.left) + 25;
+                const by = parseFloat(btn.style.top) + 25;
+                if (Math.hypot(lx - bx, ly - by) < 35) return btn;
+            }
+            return null;
+        }
+
+        function handleMove(e) {
+            if (!isDragging) return;
+            const touch = e.touches ? e.touches[0] : e;
+            const btn = getLetterUnderPoint(touch.clientX, touch.clientY);
+            if (btn) {
+                const idx = parseInt(btn.dataset.index);
+                if (!selectedIndices.includes(idx)) {
+                    selectedIndices.push(idx);
+                    btn.classList.add('selected');
+                    preview.innerText = selectedIndices.map(i => gameData.letters[i]).join('');
+                }
+            }
+            drawLines(touch.clientX, touch.clientY);
+        }
+
+        function handleEnd() {
+            if (!isDragging) return;
+            isDragging = false;
+            const word = selectedIndices.map(i => gameData.letters[i]).join('');
+            checkWord(word);
+            selectedIndices = [];
+            document.querySelectorAll('.wheel-letter').forEach(el => el.classList.remove('selected'));
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            preview.innerText = "";
+        }
+
+        function drawLines(curX, curY) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (selectedIndices.length === 0) return;
+            const wheelRect = wheel.getBoundingClientRect();
+            ctx.strokeStyle = "rgba(253, 187, 45, 0.9)";
+            ctx.lineWidth = 10;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.beginPath();
+            const letterEls = document.querySelectorAll('.wheel-letter');
+            selectedIndices.forEach((idx, i) => {
+                const btn = letterEls[idx];
+                const bx = parseFloat(btn.style.left) + 25;
+                const by = parseFloat(btn.style.top) + 25;
+                if (i === 0) ctx.moveTo(bx, by); else ctx.lineTo(bx, by);
+            });
+            if (isDragging) ctx.lineTo(curX - wheelRect.left, curY - wheelRect.top);
+            ctx.stroke();
+        }
+
+        async function checkWord(word) {
+            const gridMatches = gameData.words.filter(w => w.word === word);
+            if (gridMatches.length > 0 && !wordsStatus[word]) {
+                wordsStatus[word] = true;
+                gridMatches.forEach(match => {
+                    for(let i=0; i<word.length; i++) {
+                        const cx = match.direction === 'h' ? match.x + i : match.x;
+                        const cy = match.direction === 'v' ? match.y + i : match.y;
+                        const cell = document.getElementById(`cell-${cx}-${cy}`);
+                        if (cell) {
+                            cell.innerText = word[i];
+                            cell.classList.add('filled');
+                        }
+                    }
+                });
+
+                // Passed Check
+                if (Object.values(wordsStatus).every(v => v)) {
+                    setTimeout(async () => {
+                        await fetch('/api/next-level', { method: 'POST' });
+                        window.location.reload();
+                    }, 1000);
+                }
+                return;
+            }
+
+            // Word Checker
+            if (gameData.extraWords && gameData.extraWords.includes(word) && !foundExtraWords.has(word)) {
+                foundExtraWords.add(word);
+                const tag = document.createElement('div');
+                tag.className = 'extra-word-tag';
+                tag.innerText = word;
+                extraList.prepend(tag);
+            }
+        }
+
+        // Mouse ve Touch Event
+        wheel.addEventListener('mousedown', () => { isDragging = true; });
+        window.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', handleEnd);
+        wheel.addEventListener('touchstart', (e) => { e.preventDefault(); isDragging = true; });
+        window.addEventListener('touchmove', handleMove);
+        window.addEventListener('touchend', handleEnd);
+
+        initGame();
+    </script>
+</body>
+</html>
