@@ -96,6 +96,6 @@ If you would like to further develop the project, you can find;
 - Raw data
 in the attachments folder.
 
-#License
+# License
 This project is intended for experimentation, algorithmic exploration, and game development research.
 Feel free to use, modify, and extend it.
