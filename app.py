@@ -4,7 +4,7 @@ from word_finder import find_childs, find_parent
 import json
 import os
 
-LEVEL_FILE = '/data/levels.json'
+LEVEL_FILE = 'database/level.json'
 
 # Generating level file
 def get_level():
@@ -44,4 +44,5 @@ def next_level():
 
 
 if __name__ == '__main__':
+
     app.run(debug=True, port=5000)
